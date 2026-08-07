@@ -33,7 +33,7 @@
             <div class="d-flex align-items-center mb-4 px-2 sidebar-brand-row">
                 <i class="fa-solid fa-boxes-stacked brand-icon me-2"></i>
                 <span class="brand-title">StockFlow</span>
-                <span class="build-badge ms-2">v2.0</span>
+                <span class="build-badge ms-2">v2.1</span>
             </div>
 
             <div class="nav-eyebrow px-2">Operations</div>
@@ -41,11 +41,6 @@
                 <a class="nav-link active" href="#" data-nav="dashboard"><i class="fa-solid fa-chart-pie"></i> Dashboard</a>
                 <a class="nav-link" href="#" data-nav="products"><i class="fa-solid fa-box"></i> Products</a>
                 <a class="nav-link" href="#" data-nav="categories"><i class="fa-solid fa-layer-group"></i> Categories</a>
-            </nav>
-
-            <div class="nav-eyebrow px-2">Network</div>
-            <nav class="nav flex-column">
-                <a class="nav-link" href="#" data-nav="suppliers"><i class="fa-solid fa-truck-field"></i> Suppliers</a>
                 <a class="nav-link" href="#" data-nav="analytics"><i class="fa-solid fa-chart-line"></i> Analytics</a>
             </nav>
         </div>
@@ -70,104 +65,222 @@
         <!-- Top Bar / Header -->
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
             <div>
-                <div class="eyebrow">Inventory Console</div>
-                <h1 class="page-title">Dashboard</h1>
-                <p class="page-subtitle">Real-time overview of stock levels, valuation and reorder health.</p>
+                <div class="eyebrow" id="pageEyebrow">Inventory Console</div>
+                <h1 class="page-title" id="pageTitle">Dashboard</h1>
+                <p class="page-subtitle" id="pageSubtitle">Real-time overview of stock levels, valuation and reorder health.</p>
             </div>
             <div class="d-flex gap-2 header-actions">
                 <button class="btn btn-ghost" id="resetDataBtn"><i class="fa-solid fa-rotate"></i> Reset sample data</button>
-                <button class="btn btn-solid" data-bs-toggle="modal" data-bs-target="#addProductModal">
+                <button class="btn btn-solid" id="addProductBtn" data-bs-toggle="modal" data-bs-target="#addProductModal">
                     <i class="fa-solid fa-plus"></i> Add product
+                </button>
+                <button class="btn btn-solid" id="addCategoryBtn" data-bs-toggle="modal" data-bs-target="#categoryModal" hidden>
+                    <i class="fa-solid fa-plus"></i> Add category
                 </button>
             </div>
         </div>
 
-        <!-- Metrics Cards Row -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-4">
-                <div class="metric-card">
-                    <div class="d-flex align-items-center justify-content-between">
-                        <span class="metric-label">Total Items</span>
-                        <div class="icon-box icon-box-ink"><i class="fa-solid fa-box-open"></i></div>
+        <!-- ========== DASHBOARD PAGE ========== -->
+        <section id="page-dashboard" class="page-section">
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="metric-card">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <span class="metric-label">Total Items</span>
+                            <div class="icon-box icon-box-ink"><i class="fa-solid fa-box-open"></i></div>
+                        </div>
+                        <h2 class="metric-value" id="metricTotalItems">0</h2>
+                        <span class="metric-hint metric-hint-neutral"><i class="fa-solid fa-cubes"></i> SKUs active in storage</span>
                     </div>
-                    <h2 class="metric-value" id="metricTotalItems">0</h2>
-                    <span class="metric-hint metric-hint-neutral"><i class="fa-solid fa-cubes"></i> SKUs active in storage</span>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="metric-card">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <span class="metric-label">Low Stock Alerts</span>
+                            <div class="icon-box icon-box-amber"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                        </div>
+                        <h2 class="metric-value metric-value-amber" id="metricLowStock">0</h2>
+                        <span class="metric-hint metric-hint-amber"><i class="fa-solid fa-bell"></i> Below minimum threshold</span>
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="metric-card">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <span class="metric-label">Total Valuation</span>
+                            <div class="icon-box icon-box-teal"><i class="fa-solid fa-indian-rupee-sign"></i></div>
+                        </div>
+                        <h2 class="metric-value" id="metricTotalValuation">₹0.00</h2>
+                        <span class="metric-hint metric-hint-teal"><i class="fa-solid fa-vault"></i> Current asset value</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="col-md-4">
-                <div class="metric-card">
-                    <div class="d-flex align-items-center justify-content-between">
-                        <span class="metric-label">Low Stock Alerts</span>
-                        <div class="icon-box icon-box-amber"><i class="fa-solid fa-triangle-exclamation"></i></div>
-                    </div>
-                    <h2 class="metric-value metric-value-amber" id="metricLowStock">0</h2>
-                    <span class="metric-hint metric-hint-amber"><i class="fa-solid fa-bell"></i> Below minimum threshold</span>
-                </div>
-            </div>
-
-            <div class="col-md-4">
-                <div class="metric-card">
-                    <div class="d-flex align-items-center justify-content-between">
-                        <span class="metric-label">Total Valuation</span>
-                        <div class="icon-box icon-box-teal"><i class="fa-solid fa-indian-rupee-sign"></i></div>
-                    </div>
-                    <h2 class="metric-value" id="metricTotalValuation">₹0.00</h2>
-                    <span class="metric-hint metric-hint-teal"><i class="fa-solid fa-vault"></i> Current asset value</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Table & Analytics Chart -->
-        <div class="row g-3">
-            <div class="col-lg-8">
-                <div class="custom-table-card">
-                    <div class="table-card-header">
-                        <h6 class="fw-bold m-0"><i class="fa-solid fa-list-ul me-2"></i>Product Stock Directory</h6>
-                        <div class="table-controls">
-                            <select id="categoryFilter" class="form-select form-select-sm filter-select">
-                                <option value="">All categories</option>
-                            </select>
-                            <div class="search-box">
-                                <i class="fa-solid fa-magnifying-glass"></i>
-                                <input type="text" id="searchInput" placeholder="Search product...">
+            <div class="row g-3">
+                <div class="col-lg-8">
+                    <div class="custom-table-card">
+                        <div class="table-card-header">
+                            <h6 class="fw-bold m-0"><i class="fa-solid fa-list-ul me-2"></i>Product Stock Directory</h6>
+                            <div class="table-controls">
+                                <select id="dashCategoryFilter" class="form-select form-select-sm filter-select">
+                                    <option value="">All categories</option>
+                                </select>
+                                <div class="search-box">
+                                    <i class="fa-solid fa-magnifying-glass"></i>
+                                    <input type="text" id="dashSearchInput" placeholder="Search product...">
+                                </div>
                             </div>
                         </div>
+                        <div class="table-responsive">
+                            <table class="table align-middle m-0">
+                                <thead>
+                                    <tr>
+                                        <th data-sort="name">Product Name <i class="fa-solid fa-sort sort-icon"></i></th>
+                                        <th data-sort="category">Category <i class="fa-solid fa-sort sort-icon"></i></th>
+                                        <th data-sort="price">Price <i class="fa-solid fa-sort sort-icon"></i></th>
+                                        <th data-sort="quantity">Stock Level <i class="fa-solid fa-sort sort-icon"></i></th>
+                                        <th>Status</th>
+                                        <th class="text-end">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dashProductTableBody">
+                                    <!-- Rendered dynamically by JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                    <div class="table-responsive">
-                        <table class="table align-middle m-0">
-                            <thead>
-                                <tr>
-                                    <th data-sort="name">Product Name <i class="fa-solid fa-sort sort-icon"></i></th>
-                                    <th data-sort="category">Category <i class="fa-solid fa-sort sort-icon"></i></th>
-                                    <th data-sort="price">Price <i class="fa-solid fa-sort sort-icon"></i></th>
-                                    <th data-sort="quantity">Stock Level <i class="fa-solid fa-sort sort-icon"></i></th>
-                                    <th>Status</th>
-                                    <th class="text-end">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="productTableBody">
-                                <!-- Rendered dynamically by JavaScript -->
-                            </tbody>
-                        </table>
+                </div>
+                <div class="col-lg-4 d-flex flex-column gap-3">
+                    <div class="metric-card">
+                        <h6 class="fw-bold mb-3"><i class="fa-solid fa-chart-pie me-2"></i>Stock by Category</h6>
+                        <canvas id="categoryChart" height="200"></canvas>
+                    </div>
+                    <div class="metric-card flex-grow-1">
+                        <h6 class="fw-bold mb-3"><i class="fa-solid fa-triangle-exclamation me-2 text-warning"></i>Reorder Watchlist</h6>
+                        <div id="watchlist" class="watchlist"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== PRODUCTS PAGE ========== -->
+        <section id="page-products" class="page-section" hidden>
+            <div class="custom-table-card">
+                <div class="table-card-header">
+                    <h6 class="fw-bold m-0"><i class="fa-solid fa-list-ul me-2"></i>Product Stock Directory</h6>
+                    <div class="table-controls">
+                        <select id="categoryFilter" class="form-select form-select-sm filter-select">
+                            <option value="">All categories</option>
+                        </select>
+                        <div class="search-box">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <input type="text" id="searchInput" placeholder="Search product...">
+                        </div>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="table align-middle m-0">
+                        <thead>
+                            <tr>
+                                <th data-sort="name">Product Name <i class="fa-solid fa-sort sort-icon"></i></th>
+                                <th data-sort="category">Category <i class="fa-solid fa-sort sort-icon"></i></th>
+                                <th data-sort="price">Price <i class="fa-solid fa-sort sort-icon"></i></th>
+                                <th data-sort="quantity">Stock Level <i class="fa-solid fa-sort sort-icon"></i></th>
+                                <th>Status</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="productTableBody">
+                            <!-- Rendered dynamically by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== CATEGORIES PAGE ========== -->
+        <section id="page-categories" class="page-section" hidden>
+            <div id="categoriesGrid" class="row g-3">
+                <!-- Rendered dynamically by JavaScript -->
+            </div>
+        </section>
+
+        <!-- ========== ANALYTICS PAGE ========== -->
+        <section id="page-analytics" class="page-section" hidden>
+            <div class="row g-3 mb-3">
+                <div class="col-md-4">
+                    <div class="metric-card">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <span class="metric-label">Avg. Unit Price</span>
+                            <div class="icon-box icon-box-ink"><i class="fa-solid fa-tag"></i></div>
+                        </div>
+                        <h2 class="metric-value" id="metricAvgPrice">₹0.00</h2>
+                        <span class="metric-hint metric-hint-neutral"><i class="fa-solid fa-scale-balanced"></i> Across all SKUs</span>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="metric-card">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <span class="metric-label">Units in Stock</span>
+                            <div class="icon-box icon-box-teal"><i class="fa-solid fa-cubes-stacked"></i></div>
+                        </div>
+                        <h2 class="metric-value" id="metricTotalUnits">0</h2>
+                        <span class="metric-hint metric-hint-teal"><i class="fa-solid fa-warehouse"></i> Combined stock on hand</span>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="metric-card">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <span class="metric-label">Stock Health</span>
+                            <div class="icon-box icon-box-amber"><i class="fa-solid fa-heart-pulse"></i></div>
+                        </div>
+                        <h2 class="metric-value" id="metricHealthScore">0%</h2>
+                        <span class="metric-hint metric-hint-amber"><i class="fa-solid fa-circle-check"></i> SKUs above reorder point</span>
                     </div>
                 </div>
             </div>
 
-            <div class="col-lg-4 d-flex flex-column gap-3">
-                <div class="metric-card">
-                    <h6 class="fw-bold mb-3"><i class="fa-solid fa-chart-pie me-2"></i>Stock by Category</h6>
-                    <canvas id="categoryChart" height="200"></canvas>
+            <div class="row g-3 mb-3">
+                <div class="col-lg-7">
+                    <div class="metric-card h-100">
+                        <h6 class="fw-bold mb-3"><i class="fa-solid fa-chart-column me-2"></i>Valuation by Category</h6>
+                        <canvas id="valuationChart" height="220"></canvas>
+                    </div>
                 </div>
-                <div class="metric-card flex-grow-1">
-                    <h6 class="fw-bold mb-3"><i class="fa-solid fa-triangle-exclamation me-2 text-warning"></i>Reorder Watchlist</h6>
-                    <div id="watchlist" class="watchlist"></div>
+                <div class="col-lg-5">
+                    <div class="metric-card h-100">
+                        <h6 class="fw-bold mb-3"><i class="fa-solid fa-heart-pulse me-2"></i>Stock Health Breakdown</h6>
+                        <div id="healthBreakdown" class="health-breakdown"></div>
+                    </div>
                 </div>
             </div>
-        </div>
+
+            <div class="custom-table-card">
+                <div class="table-card-header">
+                    <h6 class="fw-bold m-0"><i class="fa-solid fa-ranking-star me-2"></i>Top Products by Value</h6>
+                </div>
+                <div class="table-responsive">
+                    <table class="table align-middle m-0">
+                        <thead>
+                            <tr>
+                                <th>Product Name</th>
+                                <th>Category</th>
+                                <th>Price</th>
+                                <th>Quantity</th>
+                                <th class="text-end">Total Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="topProductsTableBody">
+                            <!-- Rendered dynamically by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
     </main>
 
-    <!-- Modal for Adding / Editing Product -->
+    <!-- Modal: Add / Edit Product -->
     <div class="modal fade" id="addProductModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -185,11 +298,7 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Category</label>
-                            <select id="prodCategory" class="form-select" required>
-                                <option value="Electronics">Electronics</option>
-                                <option value="Office Supplies">Office Supplies</option>
-                                <option value="Hardware">Hardware</option>
-                            </select>
+                            <select id="prodCategory" class="form-select" required></select>
                         </div>
                         <div class="row">
                             <div class="col-md-6 mb-3">
@@ -218,7 +327,7 @@
         </div>
     </div>
 
-    <!-- Modal for Delete Confirmation -->
+    <!-- Modal: Delete Product Confirmation -->
     <div class="modal fade" id="deleteConfirmModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -230,6 +339,54 @@
                 <div class="modal-footer border-top-0 justify-content-center pb-4">
                     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-danger-solid" id="confirmDeleteBtn">Remove product</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Add / Edit Category -->
+    <div class="modal fade" id="categoryModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <form id="categoryForm" novalidate>
+                    <div class="modal-header">
+                        <h5 class="modal-title fw-bold" id="categoryModalTitle">Add New Category</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" id="catId">
+                        <div class="mb-3">
+                            <label class="form-label">Category Name</label>
+                            <input type="text" id="catName" class="form-control" required placeholder="e.g. Packaging">
+                            <div class="invalid-feedback">Enter a category name.</div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Color Tag</label>
+                            <div class="swatch-row" id="swatchRow"></div>
+                            <input type="hidden" id="catColor">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-solid" id="saveCategoryBtn">Save Category</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Delete Category Confirmation -->
+    <div class="modal fade" id="deleteCategoryModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-body text-center py-4">
+                    <div class="delete-icon-circle mx-auto mb-3"><i class="fa-solid fa-layer-group"></i></div>
+                    <h5 class="fw-bold mb-2" id="deleteCategoryTitle">Remove this category?</h5>
+                    <p class="text-muted mb-0" id="deleteCategoryText">This category has no products and can be safely removed.</p>
+                </div>
+                <div class="modal-footer border-top-0 justify-content-center pb-4">
+                    <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger-solid" id="confirmDeleteCategoryBtn">Remove category</button>
                 </div>
             </div>
         </div>
