@@ -711,3 +711,91 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
     text-align: right;
     flex-shrink: 0;
 }
+
+/* ---------------- Auth page (login / sign up) ---------------- */
+.auth-body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--ink-900);
+    padding: 1.5rem;
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 380px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 2rem 1.75rem;
+    box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.45);
+}
+
+.auth-brand {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.3rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--ink-900);
+    margin-bottom: 0.3rem;
+}
+.auth-brand i { color: var(--teal); }
+
+.auth-sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 1.5rem; }
+
+.auth-error {
+    background: var(--red-soft);
+    color: var(--red);
+    border: 1px solid rgba(179, 38, 30, 0.25);
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.82rem;
+    margin-bottom: 1rem;
+}
+.auth-error.info {
+    background: var(--teal-soft);
+    color: var(--teal-dark);
+    border-color: rgba(14, 124, 102, 0.25);
+}
+
+.auth-form label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin: 0.9rem 0 0.3rem;
+}
+.auth-form label:first-child { margin-top: 0; }
+
+.auth-toggle {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 1.25rem;
+}
+.auth-toggle a { color: var(--teal); font-weight: 600; text-decoration: none; }
+.auth-toggle a:hover { text-decoration: underline; }
+
+.auth-hint {
+    text-align: center;
+    font-size: 0.72rem;
+    color: var(--muted-light);
+    margin-top: 1.25rem;
+}
+.auth-hint code { background: #f1f0ea; padding: 0.1rem 0.4rem; border-radius: 4px; }
+
+.w-100 { width: 100%; justify-content: center; margin-top: 0.5rem; }
+
+/* Sidebar logout link */
+.logout-link {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: var(--muted-light);
+    margin-top: 0.6rem;
+    text-decoration: none;
+    cursor: pointer;
+}
+.logout-link:hover { color: #fff; }
