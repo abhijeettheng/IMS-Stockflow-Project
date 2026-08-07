@@ -1,27 +1,10 @@
 // ============================================================
 // StockFlow — Inventory Console
-// Client-side inventory manager backed by localStorage.
+// Backed by Supabase (Postgres + Auth). Requires config.js to be
+// loaded first with a valid SUPABASE_URL / SUPABASE_ANON_KEY.
 // ============================================================
 
-const PRODUCTS_KEY = 'stockflow_products';
-const CATEGORIES_KEY = 'stockflow_categories';
-
 const COLOR_PALETTE = ['#2455c7', '#0e7c66', '#6d3fd6', '#c9720a', '#4f7a1f', '#b3261e', '#0f6e5c', '#a3336b'];
-
-const initialCategories = [
-    { id: 'cat-electronics', name: 'Electronics', color: '#2455c7' },
-    { id: 'cat-office', name: 'Office Supplies', color: '#6d3fd6' },
-    { id: 'cat-hardware', name: 'Hardware', color: '#4f7a1f' }
-];
-
-const initialProducts = [
-    { id: 1, name: 'Dell Monitor 24"', category: 'Electronics', price: 12000.00, quantity: 12, minStock: 3 },
-    { id: 2, name: 'Wireless Mouse', category: 'Electronics', price: 850.00, quantity: 3, minStock: 5 },
-    { id: 3, name: 'A4 Paper Bundle', category: 'Office Supplies', price: 250.00, quantity: 45, minStock: 10 },
-    { id: 4, name: 'Mobile Cover', category: 'Hardware', price: 250.00, quantity: 15, minStock: 5 },
-    { id: 5, name: 'Mechanical Keyboard', category: 'Electronics', price: 3200.00, quantity: 2, minStock: 4 },
-    { id: 6, name: 'Stapler Pins Box', category: 'Office Supplies', price: 60.00, quantity: 5, minStock: 8 }
-];
 
 // ---------------- Table instances ----------------
 // Two independent product tables (Dashboard + Products page), each with
@@ -40,7 +23,9 @@ const tableState = {
 let state = {
     page: 'dashboard',
     pendingDeleteId: null,
-    pendingDeleteCategoryId: null
+    pendingDeleteName: '',
+    pendingDeleteCategoryId: null,
+    pendingDeleteCategoryName: ''
 };
 
 let categoryChartInstance = null;
@@ -53,43 +38,80 @@ const PAGE_META = {
     analytics: { title: 'Analytics', subtitle: 'Valuation trends, stock health and your highest-value products.' }
 };
 
-// ---------------- Storage helpers ----------------
-function getStoredProducts() {
-    const stored = localStorage.getItem(PRODUCTS_KEY);
-    if (!stored) {
-        localStorage.setItem(PRODUCTS_KEY, JSON.stringify(initialProducts));
-        return [...initialProducts];
-    }
-    try {
-        const parsed = JSON.parse(stored);
-        return Array.isArray(parsed) ? parsed : [...initialProducts];
-    } catch (e) {
-        return [...initialProducts];
-    }
+// ============================================================
+// SUPABASE DATA LAYER
+// ============================================================
+
+// Supabase stores min_stock (snake_case); the UI works in minStock (camelCase).
+function dbProductToApp(row) {
+    return {
+        id: row.id,
+        name: row.name,
+        category: row.category,
+        price: Number(row.price),
+        quantity: row.quantity,
+        minStock: row.min_stock
+    };
 }
 
-function saveProducts(products) {
-    localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products));
-    renderAll();
+function appProductToDb(payload) {
+    return {
+        name: payload.name,
+        category: payload.category,
+        price: payload.price,
+        quantity: payload.quantity,
+        min_stock: payload.minStock
+    };
 }
 
-function getStoredCategories() {
-    const stored = localStorage.getItem(CATEGORIES_KEY);
-    if (!stored) {
-        localStorage.setItem(CATEGORIES_KEY, JSON.stringify(initialCategories));
-        return [...initialCategories];
+async function getStoredProducts() {
+    const { data, error } = await supabaseClient.from('products').select('*').order('name');
+    if (error) {
+        showToast(error.message, 'error');
+        return [];
     }
-    try {
-        const parsed = JSON.parse(stored);
-        return Array.isArray(parsed) && parsed.length ? parsed : [...initialCategories];
-    } catch (e) {
-        return [...initialCategories];
-    }
+    return (data || []).map(dbProductToApp);
 }
 
-function saveCategories(categories) {
-    localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
-    renderAll();
+async function getStoredCategories() {
+    const { data, error } = await supabaseClient.from('categories').select('*').order('name');
+    if (error) {
+        showToast(error.message, 'error');
+        return [];
+    }
+    return data || [];
+}
+
+async function insertProduct(payload) {
+    const { error } = await supabaseClient.from('products').insert(appProductToDb(payload));
+    return error;
+}
+
+async function updateProductRow(id, payload) {
+    const { error } = await supabaseClient.from('products').update(appProductToDb(payload)).eq('id', id);
+    return error;
+}
+
+async function deleteProductRow(id) {
+    const { error } = await supabaseClient.from('products').delete().eq('id', id);
+    return error;
+}
+
+async function insertCategory(payload) {
+    const { error } = await supabaseClient.from('categories').insert({ name: payload.name, color: payload.color });
+    return error;
+}
+
+async function updateCategoryRow(id, payload) {
+    // Renaming here also renames the category on every product that uses it —
+    // handled automatically by the "on update cascade" foreign key in schema.sql.
+    const { error } = await supabaseClient.from('categories').update({ name: payload.name, color: payload.color }).eq('id', id);
+    return error;
+}
+
+async function deleteCategoryRow(id) {
+    const { error } = await supabaseClient.from('categories').delete().eq('id', id);
+    return error;
 }
 
 function nextCategoryColor(categories) {
@@ -140,6 +162,34 @@ function showToast(message, type = 'success') {
 }
 
 // ============================================================
+// AUTH
+// ============================================================
+async function requireSession() {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) {
+        window.location.href = 'login.html';
+        return null;
+    }
+    return session;
+}
+
+function renderUserBadge(session) {
+    const email = session.user.email || 'You';
+    document.getElementById('userAvatar').innerText = email.slice(0, 2).toUpperCase();
+    document.getElementById('userName').innerText = email;
+}
+
+document.getElementById('logoutBtn').addEventListener('click', async (e) => {
+    e.preventDefault();
+    await supabaseClient.auth.signOut();
+    window.location.href = 'login.html';
+});
+
+supabaseClient.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT') window.location.href = 'login.html';
+});
+
+// ============================================================
 // PAGE NAVIGATION
 // ============================================================
 function goToPage(page) {
@@ -165,8 +215,7 @@ function goToPage(page) {
 document.querySelectorAll('.sidebar .nav-link').forEach(link => {
     link.addEventListener('click', (e) => {
         e.preventDefault();
-        const page = link.dataset.nav;
-        goToPage(page);
+        goToPage(link.dataset.nav);
     });
 });
 
@@ -175,9 +224,9 @@ document.querySelectorAll('.sidebar .nav-link').forEach(link => {
 // of which page is currently visible, so switching pages never
 // shows stale data.
 // ============================================================
-function renderAll() {
-    const products = getStoredProducts();
-    const categories = getStoredCategories();
+async function renderAll() {
+    const products = await getStoredProducts();
+    const categories = await getStoredCategories();
 
     Object.keys(TABLE_CONFIGS).forEach(key => {
         populateCategoryFilter(key, products, categories);
@@ -418,8 +467,8 @@ function renderCategoriesGrid(products, categories) {
                         <span class="category-card-name">${escapeHtml(cat.name)}</span>
                     </div>
                     <div class="action-cell">
-                        <button class="btn-icon-sm" title="Edit" onclick="openEditCategoryModal('${cat.id}')"><i class="fa-solid fa-pen"></i></button>
-                        <button class="btn-icon-sm danger" title="Delete" onclick="openDeleteCategoryModal('${cat.id}')"><i class="fa-solid fa-trash-can"></i></button>
+                        <button class="btn-icon-sm" title="Edit" onclick="openEditCategoryModal(${cat.id})"><i class="fa-solid fa-pen"></i></button>
+                        <button class="btn-icon-sm danger" title="Delete" onclick="openDeleteCategoryModal(${cat.id})"><i class="fa-solid fa-trash-can"></i></button>
                     </div>
                 </div>
                 <div class="category-card-stats">
@@ -446,7 +495,6 @@ function renderAnalytics(products, categories) {
     const canvas = document.getElementById('valuationChart');
     if (!canvas) return; // analytics DOM not present yet
 
-    // --- Stat cards ---
     const totalUnits = products.reduce((sum, p) => sum + p.quantity, 0);
     const avgPrice = products.length ? products.reduce((sum, p) => sum + p.price, 0) / products.length : 0;
     const healthyCount = products.filter(p => stockLevel(p) === 'ok').length;
@@ -456,7 +504,6 @@ function renderAnalytics(products, categories) {
     document.getElementById('metricTotalUnits').innerText = totalUnits;
     document.getElementById('metricHealthScore').innerText = `${healthScore}%`;
 
-    // --- Valuation by category (bar chart) ---
     const totalsByCategory = {};
     products.forEach(p => {
         totalsByCategory[p.category] = (totalsByCategory[p.category] || 0) + p.price * p.quantity;
@@ -488,7 +535,6 @@ function renderAnalytics(products, categories) {
         });
     }
 
-    // --- Stock health breakdown ---
     const counts = { ok: 0, low: 0, critical: 0 };
     products.forEach(p => counts[stockLevel(p)]++);
     const total = products.length || 1;
@@ -508,7 +554,6 @@ function renderAnalytics(products, categories) {
         </div>
     `).join('');
 
-    // --- Top products by value ---
     const top = [...products]
         .sort((a, b) => (b.price * b.quantity) - (a.price * a.quantity))
         .slice(0, 5);
@@ -568,22 +613,22 @@ function clearValidation() {
 }
 
 // ---------------- Add / Edit product ----------------
-function openAddModal() {
+async function openAddModal() {
     document.getElementById('addProductForm').reset();
     document.getElementById('prodId').value = '';
     document.getElementById('productModalTitle').innerText = 'Add New Product';
     document.getElementById('saveProductBtn').innerText = 'Save Product';
     document.getElementById('prodMinStock').value = 5;
-    populateProductCategorySelect(getStoredCategories());
+    populateProductCategorySelect(await getStoredCategories());
     clearValidation();
 }
 
-function openEditModal(id) {
-    const products = getStoredProducts();
+async function openEditModal(id) {
+    const products = await getStoredProducts();
     const product = products.find(p => p.id === id);
     if (!product) return;
 
-    populateProductCategorySelect(getStoredCategories());
+    populateProductCategorySelect(await getStoredCategories());
     document.getElementById('prodId').value = product.id;
     document.getElementById('prodName').value = product.name;
     document.getElementById('prodCategory').value = product.category;
@@ -597,13 +642,11 @@ function openEditModal(id) {
     new bootstrap.Modal(document.getElementById('addProductModal')).show();
 }
 
-document.getElementById('addProductForm').addEventListener('submit', function (e) {
+document.getElementById('addProductForm').addEventListener('submit', async function (e) {
     e.preventDefault();
     if (!validateForm()) return;
 
-    const products = getStoredProducts();
     const id = document.getElementById('prodId').value;
-
     const payload = {
         name: document.getElementById('prodName').value.trim(),
         category: document.getElementById('prodCategory').value,
@@ -612,48 +655,51 @@ document.getElementById('addProductForm').addEventListener('submit', function (e
         price: parseFloat(document.getElementById('prodPrice').value)
     };
 
-    if (id) {
-        const idx = products.findIndex(p => p.id === Number(id));
-        if (idx !== -1) {
-            products[idx] = { ...products[idx], ...payload };
-            saveProducts(products);
-            showToast(`${payload.name} updated`, 'success');
-        }
-    } else {
-        products.push({ id: Date.now(), ...payload });
-        saveProducts(products);
-        showToast(`${payload.name} added to inventory`, 'success');
+    const error = id ? await updateProductRow(Number(id), payload) : await insertProduct(payload);
+    if (error) {
+        showToast(error.message, 'error');
+        return;
     }
+
+    await renderAll();
+    showToast(id ? `${payload.name} updated` : `${payload.name} added to inventory`, 'success');
 
     this.reset();
     bootstrap.Modal.getInstance(document.getElementById('addProductModal'))?.hide();
 });
 
-document.getElementById('addProductModal').addEventListener('show.bs.modal', function (e) {
+document.getElementById('addProductModal').addEventListener('show.bs.modal', async function (e) {
     if (!e.relatedTarget) return; // opened programmatically via openEditModal, already populated
-    openAddModal();
+    await openAddModal();
 });
 
 // ---------------- Delete product ----------------
-function openDeleteModal(id) {
-    const products = getStoredProducts();
+async function openDeleteModal(id) {
+    const products = await getStoredProducts();
     const product = products.find(p => p.id === id);
     if (!product) return;
 
     state.pendingDeleteId = id;
+    state.pendingDeleteName = product.name;
     document.getElementById('deleteConfirmText').innerText =
         `"${product.name}" will be permanently removed from your inventory.`;
 
     new bootstrap.Modal(document.getElementById('deleteConfirmModal')).show();
 }
 
-document.getElementById('confirmDeleteBtn').addEventListener('click', function () {
+document.getElementById('confirmDeleteBtn').addEventListener('click', async function () {
     if (state.pendingDeleteId == null) return;
-    let products = getStoredProducts();
-    const product = products.find(p => p.id === state.pendingDeleteId);
-    products = products.filter(p => p.id !== state.pendingDeleteId);
-    saveProducts(products);
-    showToast(`${product ? product.name : 'Product'} removed`, 'warn');
+    const id = state.pendingDeleteId;
+    const name = state.pendingDeleteName;
+
+    const error = await deleteProductRow(id);
+    if (error) {
+        showToast(error.message, 'error');
+        return;
+    }
+
+    await renderAll();
+    showToast(`${name || 'Product'} removed`, 'warn');
     state.pendingDeleteId = null;
     bootstrap.Modal.getInstance(document.getElementById('deleteConfirmModal'))?.hide();
 });
@@ -677,8 +723,8 @@ function selectSwatch(color) {
     });
 }
 
-function openAddCategoryModal() {
-    const categories = getStoredCategories();
+async function openAddCategoryModal() {
+    const categories = await getStoredCategories();
     document.getElementById('categoryForm').reset();
     document.getElementById('catId').value = '';
     document.getElementById('categoryModalTitle').innerText = 'Add New Category';
@@ -687,8 +733,8 @@ function openAddCategoryModal() {
     clearCategoryValidation();
 }
 
-function openEditCategoryModal(id) {
-    const categories = getStoredCategories();
+async function openEditCategoryModal(id) {
+    const categories = await getStoredCategories();
     const cat = categories.find(c => c.id === id);
     if (!cat) return;
 
@@ -706,80 +752,73 @@ function clearCategoryValidation() {
     document.getElementById('catName').classList.remove('is-invalid');
 }
 
-document.getElementById('categoryModal').addEventListener('show.bs.modal', function (e) {
+document.getElementById('categoryModal').addEventListener('show.bs.modal', async function (e) {
     if (!e.relatedTarget) return; // opened programmatically via openEditCategoryModal
-    openAddCategoryModal();
+    await openAddCategoryModal();
 });
 
-document.getElementById('categoryForm').addEventListener('submit', function (e) {
+document.getElementById('categoryForm').addEventListener('submit', async function (e) {
     e.preventDefault();
     const nameInput = document.getElementById('catName');
     const name = nameInput.value.trim();
     const color = document.getElementById('catColor').value || COLOR_PALETTE[0];
     const id = document.getElementById('catId').value;
 
-    const categories = getStoredCategories();
-    const duplicate = categories.some(c => c.name.toLowerCase() === name.toLowerCase() && c.id !== id);
-
-    if (!name || duplicate) {
+    if (!name) {
         nameInput.classList.add('is-invalid');
-        showToast(duplicate ? 'That category name already exists' : 'Enter a category name', 'error');
+        showToast('Enter a category name', 'error');
         return;
     }
     nameInput.classList.remove('is-invalid');
 
-    if (id) {
-        const idx = categories.findIndex(c => c.id === id);
-        const oldName = categories[idx].name;
-        categories[idx] = { ...categories[idx], name, color };
-        saveCategories(categories);
-
-        if (oldName !== name) {
-            const products = getStoredProducts().map(p => p.category === oldName ? { ...p, category: name } : p);
-            saveProducts(products);
-        }
-        showToast(`${name} updated`, 'success');
-    } else {
-        categories.push({ id: `cat-${Date.now()}`, name, color });
-        saveCategories(categories);
-        showToast(`${name} added`, 'success');
+    const payload = { name, color };
+    const error = id ? await updateCategoryRow(Number(id), payload) : await insertCategory(payload);
+    if (error) {
+        // Postgres unique_violation
+        showToast(error.code === '23505' ? 'That category name already exists' : error.message, 'error');
+        return;
     }
+
+    await renderAll();
+    showToast(id ? `${name} updated` : `${name} added`, 'success');
 
     this.reset();
     bootstrap.Modal.getInstance(document.getElementById('categoryModal'))?.hide();
 });
 
-function openDeleteCategoryModal(id) {
-    const categories = getStoredCategories();
+async function openDeleteCategoryModal(id) {
+    const categories = await getStoredCategories();
     const cat = categories.find(c => c.id === id);
     if (!cat) return;
 
-    const productsInUse = getStoredProducts().filter(p => p.category === cat.name).length;
     state.pendingDeleteCategoryId = id;
-
-    const confirmBtn = document.getElementById('confirmDeleteCategoryBtn');
-    if (productsInUse > 0) {
-        document.getElementById('deleteCategoryTitle').innerText = 'Category still in use';
-        document.getElementById('deleteCategoryText').innerText =
-            `"${cat.name}" is used by ${productsInUse} product${productsInUse > 1 ? 's' : ''}. Reassign or delete those products before removing this category.`;
-        confirmBtn.hidden = true;
-    } else {
-        document.getElementById('deleteCategoryTitle').innerText = 'Remove this category?';
-        document.getElementById('deleteCategoryText').innerText =
-            `"${cat.name}" has no products and can be safely removed.`;
-        confirmBtn.hidden = false;
-    }
+    state.pendingDeleteCategoryName = cat.name;
+    document.getElementById('deleteCategoryTitle').innerText = 'Remove this category?';
+    document.getElementById('deleteCategoryText').innerText =
+        `"${cat.name}" will be removed. This is blocked if any product still uses it.`;
+    document.getElementById('confirmDeleteCategoryBtn').hidden = false;
 
     new bootstrap.Modal(document.getElementById('deleteCategoryModal')).show();
 }
 
-document.getElementById('confirmDeleteCategoryBtn').addEventListener('click', function () {
+document.getElementById('confirmDeleteCategoryBtn').addEventListener('click', async function () {
     if (!state.pendingDeleteCategoryId) return;
-    let categories = getStoredCategories();
-    const cat = categories.find(c => c.id === state.pendingDeleteCategoryId);
-    categories = categories.filter(c => c.id !== state.pendingDeleteCategoryId);
-    saveCategories(categories);
-    showToast(`${cat ? cat.name : 'Category'} removed`, 'warn');
+    const id = state.pendingDeleteCategoryId;
+    const name = state.pendingDeleteCategoryName;
+
+    const error = await deleteCategoryRow(id);
+    if (error) {
+        // Postgres foreign_key_violation — products still reference this category
+        const message = error.code === '23503'
+            ? `"${name}" is still used by one or more products. Reassign or delete them first.`
+            : error.message;
+        showToast(message, 'error');
+        bootstrap.Modal.getInstance(document.getElementById('deleteCategoryModal'))?.hide();
+        return;
+    }
+
+    await renderAll();
+    showToast(`${name} removed`, 'warn');
     state.pendingDeleteCategoryId = null;
     bootstrap.Modal.getInstance(document.getElementById('deleteCategoryModal'))?.hide();
 });
@@ -787,16 +826,37 @@ document.getElementById('confirmDeleteCategoryBtn').addEventListener('click', fu
 // ============================================================
 // RESET / SEARCH / FILTER / SORT / SIDEBAR
 // ============================================================
-document.getElementById('resetDataBtn').addEventListener('click', () => {
-    localStorage.removeItem(PRODUCTS_KEY);
-    localStorage.removeItem(CATEGORIES_KEY);
+document.getElementById('resetDataBtn').addEventListener('click', async () => {
+    // Wipe existing rows (categories after products, since products
+    // reference categories by name)
+    await supabaseClient.from('products').delete().neq('id', 0);
+    await supabaseClient.from('categories').delete().neq('id', 0);
+
+    const { error: catErr } = await supabaseClient.from('categories').insert([
+        { name: 'Electronics', color: '#2455c7' },
+        { name: 'Office Supplies', color: '#6d3fd6' },
+        { name: 'Hardware', color: '#4f7a1f' }
+    ]);
+    if (catErr) { showToast(catErr.message, 'error'); return; }
+
+    const { error: prodErr } = await supabaseClient.from('products').insert([
+        { name: 'Dell Monitor 24"', category: 'Electronics', price: 12000.00, quantity: 12, min_stock: 3 },
+        { name: 'Wireless Mouse', category: 'Electronics', price: 850.00, quantity: 3, min_stock: 5 },
+        { name: 'A4 Paper Bundle', category: 'Office Supplies', price: 250.00, quantity: 45, min_stock: 10 },
+        { name: 'Mobile Cover', category: 'Hardware', price: 250.00, quantity: 15, min_stock: 5 },
+        { name: 'Mechanical Keyboard', category: 'Electronics', price: 3200.00, quantity: 2, min_stock: 4 },
+        { name: 'Stapler Pins Box', category: 'Office Supplies', price: 60.00, quantity: 5, min_stock: 8 }
+    ]);
+    if (prodErr) { showToast(prodErr.message, 'error'); return; }
+
     Object.keys(tableState).forEach(key => {
         tableState[key].search = '';
         tableState[key].category = '';
         const input = document.getElementById(TABLE_CONFIGS[key].search);
         if (input) input.value = '';
     });
-    renderAll();
+
+    await renderAll();
     showToast('Sample data restored', 'success');
 });
 
@@ -852,6 +912,9 @@ document.getElementById('hamburgerBtn').addEventListener('click', openSidebar);
 document.getElementById('sidebarBackdrop').addEventListener('click', closeSidebar);
 
 // ---------------- Initial load ----------------
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    const session = await requireSession();
+    if (!session) return; // requireSession already redirected to login.html
+    renderUserBadge(session);
     goToPage('dashboard');
 });
