@@ -3,7 +3,16 @@
 // Client-side inventory manager backed by localStorage.
 // ============================================================
 
-const STORAGE_KEY = 'stockflow_products';
+const PRODUCTS_KEY = 'stockflow_products';
+const CATEGORIES_KEY = 'stockflow_categories';
+
+const COLOR_PALETTE = ['#2455c7', '#0e7c66', '#6d3fd6', '#c9720a', '#4f7a1f', '#b3261e', '#0f6e5c', '#a3336b'];
+
+const initialCategories = [
+    { id: 'cat-electronics', name: 'Electronics', color: '#2455c7' },
+    { id: 'cat-office', name: 'Office Supplies', color: '#6d3fd6' },
+    { id: 'cat-hardware', name: 'Hardware', color: '#4f7a1f' }
+];
 
 const initialProducts = [
     { id: 1, name: 'Dell Monitor 24"', category: 'Electronics', price: 12000.00, quantity: 12, minStock: 3 },
@@ -14,22 +23,41 @@ const initialProducts = [
     { id: 6, name: 'Stapler Pins Box', category: 'Office Supplies', price: 60.00, quantity: 5, minStock: 8 }
 ];
 
-// ---------------- State ----------------
+// ---------------- Table instances ----------------
+// Two independent product tables (Dashboard + Products page), each with
+// its own search / category filter / sort state so they don't interfere.
+const TABLE_CONFIGS = {
+    dashboard: { tbody: 'dashProductTableBody', search: 'dashSearchInput', filter: 'dashCategoryFilter', section: 'page-dashboard' },
+    products: { tbody: 'productTableBody', search: 'searchInput', filter: 'categoryFilter', section: 'page-products' }
+};
+
+const tableState = {
+    dashboard: { search: '', category: '', sortKey: 'name', sortDir: 'asc' },
+    products: { search: '', category: '', sortKey: 'name', sortDir: 'asc' }
+};
+
+// ---------------- App state ----------------
 let state = {
-    search: '',
-    category: '',
-    sortKey: 'name',
-    sortDir: 'asc',
-    pendingDeleteId: null
+    page: 'dashboard',
+    pendingDeleteId: null,
+    pendingDeleteCategoryId: null
 };
 
 let categoryChartInstance = null;
+let valuationChartInstance = null;
+
+const PAGE_META = {
+    dashboard: { title: 'Dashboard', subtitle: 'Real-time overview of stock levels, valuation and reorder health.' },
+    products: { title: 'Products', subtitle: 'Search, filter and manage every item in your inventory.' },
+    categories: { title: 'Categories', subtitle: 'Group products, track category totals and keep tagging consistent.' },
+    analytics: { title: 'Analytics', subtitle: 'Valuation trends, stock health and your highest-value products.' }
+};
 
 // ---------------- Storage helpers ----------------
 function getStoredProducts() {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(PRODUCTS_KEY);
     if (!stored) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(initialProducts));
+        localStorage.setItem(PRODUCTS_KEY, JSON.stringify(initialProducts));
         return [...initialProducts];
     }
     try {
@@ -41,8 +69,33 @@ function getStoredProducts() {
 }
 
 function saveProducts(products) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
-    renderApp();
+    localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products));
+    renderAll();
+}
+
+function getStoredCategories() {
+    const stored = localStorage.getItem(CATEGORIES_KEY);
+    if (!stored) {
+        localStorage.setItem(CATEGORIES_KEY, JSON.stringify(initialCategories));
+        return [...initialCategories];
+    }
+    try {
+        const parsed = JSON.parse(stored);
+        return Array.isArray(parsed) && parsed.length ? parsed : [...initialCategories];
+    } catch (e) {
+        return [...initialCategories];
+    }
+}
+
+function saveCategories(categories) {
+    localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
+    renderAll();
+}
+
+function nextCategoryColor(categories) {
+    const used = categories.map(c => c.color);
+    const free = COLOR_PALETTE.find(c => !used.includes(c));
+    return free || COLOR_PALETTE[categories.length % COLOR_PALETTE.length];
 }
 
 // ---------------- Formatting helpers ----------------
@@ -51,13 +104,13 @@ function formatCurrency(value) {
     return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function categoryClass(category) {
-    const map = {
-        'Electronics': 'cat-electronics',
-        'Office Supplies': 'cat-office-supplies',
-        'Hardware': 'cat-hardware'
-    };
-    return map[category] || 'cat-default';
+function findCategory(categories, name) {
+    return categories.find(c => c.name === name);
+}
+
+function categoryColor(categories, name) {
+    const found = findCategory(categories, name);
+    return found ? found.color : '#52596b';
 }
 
 function stockLevel(p) {
@@ -68,7 +121,7 @@ function stockLevel(p) {
 
 function escapeHtml(str) {
     const div = document.createElement('div');
-    div.innerText = str;
+    div.innerText = str == null ? '' : String(str);
     return div.innerHTML;
 }
 
@@ -77,7 +130,7 @@ function showToast(message, type = 'success') {
     const stack = document.getElementById('toastStack');
     const icons = { success: 'fa-circle-check', error: 'fa-circle-xmark', warn: 'fa-triangle-exclamation' };
     const toast = document.createElement('div');
-    toast.className = `sf-toast toast-${type === 'success' ? '' : type}`.trim();
+    toast.className = `sf-toast ${type !== 'success' ? 'toast-' + type : ''}`.trim();
     toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.success}"></i><span>${escapeHtml(message)}</span>`;
     stack.appendChild(toast);
     setTimeout(() => {
@@ -86,58 +139,113 @@ function showToast(message, type = 'success') {
     }, 2600);
 }
 
-// ---------------- Category filter options ----------------
-function populateCategoryFilter(products) {
-    const select = document.getElementById('categoryFilter');
-    const current = state.category;
-    const categories = [...new Set(products.map(p => p.category))].sort();
+// ============================================================
+// PAGE NAVIGATION
+// ============================================================
+function goToPage(page) {
+    state.page = page;
+
+    document.querySelectorAll('.page-section').forEach(sec => sec.setAttribute('hidden', ''));
+    document.getElementById(`page-${page}`)?.removeAttribute('hidden');
+
+    document.querySelectorAll('.sidebar .nav-link').forEach(l => l.classList.remove('active'));
+    document.querySelector(`.sidebar .nav-link[data-nav="${page}"]`)?.classList.add('active');
+
+    const meta = PAGE_META[page] || { title: page, subtitle: '' };
+    document.getElementById('pageTitle').innerText = meta.title;
+    document.getElementById('pageSubtitle').innerText = meta.subtitle;
+
+    document.getElementById('addProductBtn').hidden = page === 'categories' || page === 'analytics';
+    document.getElementById('addCategoryBtn').hidden = page !== 'categories';
+
+    closeSidebar();
+    renderAll();
+}
+
+document.querySelectorAll('.sidebar .nav-link').forEach(link => {
+    link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const page = link.dataset.nav;
+        goToPage(page);
+    });
+});
+
+// ============================================================
+// MASTER RENDER — always keeps every section in sync, regardless
+// of which page is currently visible, so switching pages never
+// shows stale data.
+// ============================================================
+function renderAll() {
+    const products = getStoredProducts();
+    const categories = getStoredCategories();
+
+    Object.keys(TABLE_CONFIGS).forEach(key => {
+        populateCategoryFilter(key, products, categories);
+        renderProductTable(key, products, categories);
+        updateSortIcons(key);
+    });
+
+    populateProductCategorySelect(categories);
+    renderMetrics(products);
+    renderCategoryChart(products, categories);
+    renderWatchlist(products);
+    renderCategoriesGrid(products, categories);
+    renderAnalytics(products, categories);
+}
+
+// ---------------- Category dropdown (filters on Dashboard + Products tables) ----------------
+function populateCategoryFilter(key, products, categories) {
+    const select = document.getElementById(TABLE_CONFIGS[key].filter);
+    if (!select) return;
+    const current = tableState[key].category;
+    const names = categories.map(c => c.name);
     select.innerHTML = '<option value="">All categories</option>' +
-        categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-    select.value = categories.includes(current) ? current : '';
-    state.category = select.value;
+        names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    select.value = names.includes(current) ? current : '';
+    tableState[key].category = select.value;
+}
+
+// ---------------- Category dropdown (Add/Edit product modal) ----------------
+function populateProductCategorySelect(categories) {
+    const select = document.getElementById('prodCategory');
+    const current = select.value;
+    select.innerHTML = categories.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+    if (categories.some(c => c.name === current)) select.value = current;
 }
 
 // ---------------- Filtering & sorting ----------------
-function getVisibleProducts(products) {
+function getVisibleProducts(key, products) {
+    const s = tableState[key];
     let list = [...products];
 
-    if (state.category) {
-        list = list.filter(p => p.category === state.category);
+    if (s.category) {
+        list = list.filter(p => p.category === s.category);
     }
-    if (state.search) {
-        const q = state.search.toLowerCase();
+    if (s.search) {
+        const q = s.search.toLowerCase();
         list = list.filter(p =>
             p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)
         );
     }
 
     list.sort((a, b) => {
-        let va = a[state.sortKey];
-        let vb = b[state.sortKey];
+        let va = a[s.sortKey];
+        let vb = b[s.sortKey];
         if (typeof va === 'string') { va = va.toLowerCase(); vb = vb.toLowerCase(); }
-        if (va < vb) return state.sortDir === 'asc' ? -1 : 1;
-        if (va > vb) return state.sortDir === 'asc' ? 1 : -1;
+        if (va < vb) return s.sortDir === 'asc' ? -1 : 1;
+        if (va > vb) return s.sortDir === 'asc' ? 1 : -1;
         return 0;
     });
 
     return list;
 }
 
-// ---------------- Rendering ----------------
-function renderApp() {
-    const products = getStoredProducts();
-    populateCategoryFilter(products);
-    const visible = getVisibleProducts(products);
+// ---------------- Product directory table (shared renderer) ----------------
+function renderProductTable(key, allProducts, categories) {
+    const tableBody = document.getElementById(TABLE_CONFIGS[key].tbody);
+    if (!tableBody) return;
 
-    renderTable(visible);
-    renderMetrics(products);
-    renderCategoryChart(products);
-    renderWatchlist(products);
-    updateSortIcons();
-}
-
-function renderTable(products) {
-    const tableBody = document.getElementById('productTableBody');
+    const products = getVisibleProducts(key, allProducts);
     tableBody.innerHTML = '';
 
     if (products.length === 0) {
@@ -157,6 +265,7 @@ function renderTable(products) {
     products.forEach((p) => {
         const level = stockLevel(p);
         const gaugePct = Math.min(100, Math.round((p.quantity / Math.max(p.minStock * 2, 1)) * 100));
+        const color = categoryColor(categories, p.category);
         const row = document.createElement('tr');
         row.className = level !== 'ok' ? 'row-low-stock' : '';
         row.innerHTML = `
@@ -164,7 +273,7 @@ function renderTable(products) {
                 <span class="product-name-cell">${escapeHtml(p.name)}</span>
                 <span class="product-sku">SKU-${String(p.id).slice(-5)}</span>
             </td>
-            <td><span class="cat-pill ${categoryClass(p.category)}">${escapeHtml(p.category)}</span></td>
+            <td><span class="cat-pill" style="background:${color}1a;color:${color}">${escapeHtml(p.category)}</span></td>
             <td class="price-cell">${formatCurrency(p.price)}</td>
             <td>
                 <div class="stock-gauge">
@@ -190,6 +299,20 @@ function renderTable(products) {
     });
 }
 
+function updateSortIcons(key) {
+    const section = document.getElementById(TABLE_CONFIGS[key].section);
+    if (!section) return;
+    section.querySelectorAll('th[data-sort]').forEach(th => {
+        const icon = th.querySelector('.sort-icon');
+        if (th.dataset.sort === tableState[key].sortKey) {
+            icon.className = `fa-solid sort-icon active ${tableState[key].sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down'}`;
+        } else {
+            icon.className = 'fa-solid fa-sort sort-icon';
+        }
+    });
+}
+
+// ---------------- Dashboard: metrics / chart / watchlist ----------------
 function renderMetrics(products) {
     const totalValuation = products.reduce((sum, p) => sum + p.price * p.quantity, 0);
     const lowStockCount = products.filter(p => p.quantity <= p.minStock).length;
@@ -199,8 +322,10 @@ function renderMetrics(products) {
     document.getElementById('metricTotalValuation').innerText = formatCurrency(totalValuation);
 }
 
-function renderCategoryChart(products) {
-    const ctx = document.getElementById('categoryChart').getContext('2d');
+function renderCategoryChart(products, categories) {
+    const canvas = document.getElementById('categoryChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     const totalsByCategory = {};
     products.forEach(p => {
         totalsByCategory[p.category] = (totalsByCategory[p.category] || 0) + p.quantity;
@@ -208,13 +333,9 @@ function renderCategoryChart(products) {
 
     const labels = Object.keys(totalsByCategory);
     const data = Object.values(totalsByCategory);
-    const palette = ['#0e7c66', '#c9720a', '#6d3fd6', '#2455c7', '#4f7a1f', '#b3261e'];
 
     if (categoryChartInstance) categoryChartInstance.destroy();
-
-    if (labels.length === 0) {
-        return;
-    }
+    if (labels.length === 0) return;
 
     categoryChartInstance = new Chart(ctx, {
         type: 'doughnut',
@@ -222,7 +343,7 @@ function renderCategoryChart(products) {
             labels,
             datasets: [{
                 data,
-                backgroundColor: labels.map((_, i) => palette[i % palette.length]),
+                backgroundColor: labels.map(name => categoryColor(categories, name)),
                 borderWidth: 2,
                 borderColor: '#ffffff'
             }]
@@ -242,6 +363,7 @@ function renderCategoryChart(products) {
 
 function renderWatchlist(products) {
     const container = document.getElementById('watchlist');
+    if (!container) return;
     const lowStock = products
         .filter(p => p.quantity <= p.minStock)
         .sort((a, b) => (a.quantity - a.minStock) - (b.quantity - b.minStock));
@@ -266,18 +388,162 @@ function renderWatchlist(products) {
     `).join('');
 }
 
-function updateSortIcons() {
-    document.querySelectorAll('th[data-sort]').forEach(th => {
-        const icon = th.querySelector('.sort-icon');
-        if (th.dataset.sort === state.sortKey) {
-            icon.className = `fa-solid sort-icon active ${state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down'}`;
-        } else {
-            icon.className = 'fa-solid fa-sort sort-icon';
-        }
-    });
+// ---------------- Categories page ----------------
+function renderCategoriesGrid(products, categories) {
+    const grid = document.getElementById('categoriesGrid');
+    if (!grid) return;
+
+    if (categories.length === 0) {
+        grid.innerHTML = `
+            <div class="col-12">
+                <div class="empty-state">
+                    <i class="fa-solid fa-layer-group"></i>
+                    <strong>No categories yet</strong>
+                    <span>Add a category to start grouping your products.</span>
+                </div>
+            </div>`;
+        return;
+    }
+
+    grid.innerHTML = categories.map(cat => {
+        const catProducts = products.filter(p => p.category === cat.name);
+        const totalUnits = catProducts.reduce((sum, p) => sum + p.quantity, 0);
+        const totalValue = catProducts.reduce((sum, p) => sum + p.price * p.quantity, 0);
+        return `
+        <div class="col-md-6 col-xl-4">
+            <div class="metric-card category-card">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="cat-dot" style="background:${cat.color}"></span>
+                        <span class="category-card-name">${escapeHtml(cat.name)}</span>
+                    </div>
+                    <div class="action-cell">
+                        <button class="btn-icon-sm" title="Edit" onclick="openEditCategoryModal('${cat.id}')"><i class="fa-solid fa-pen"></i></button>
+                        <button class="btn-icon-sm danger" title="Delete" onclick="openDeleteCategoryModal('${cat.id}')"><i class="fa-solid fa-trash-can"></i></button>
+                    </div>
+                </div>
+                <div class="category-card-stats">
+                    <div>
+                        <span class="category-stat-value">${catProducts.length}</span>
+                        <span class="category-stat-label">Products</span>
+                    </div>
+                    <div>
+                        <span class="category-stat-value">${totalUnits}</span>
+                        <span class="category-stat-label">Units</span>
+                    </div>
+                    <div>
+                        <span class="category-stat-value">${formatCurrency(totalValue)}</span>
+                        <span class="category-stat-label">Value</span>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
 }
 
-// ---------------- Form validation ----------------
+// ---------------- Analytics page ----------------
+function renderAnalytics(products, categories) {
+    const canvas = document.getElementById('valuationChart');
+    if (!canvas) return; // analytics DOM not present yet
+
+    // --- Stat cards ---
+    const totalUnits = products.reduce((sum, p) => sum + p.quantity, 0);
+    const avgPrice = products.length ? products.reduce((sum, p) => sum + p.price, 0) / products.length : 0;
+    const healthyCount = products.filter(p => stockLevel(p) === 'ok').length;
+    const healthScore = products.length ? Math.round((healthyCount / products.length) * 100) : 0;
+
+    document.getElementById('metricAvgPrice').innerText = formatCurrency(avgPrice);
+    document.getElementById('metricTotalUnits').innerText = totalUnits;
+    document.getElementById('metricHealthScore').innerText = `${healthScore}%`;
+
+    // --- Valuation by category (bar chart) ---
+    const totalsByCategory = {};
+    products.forEach(p => {
+        totalsByCategory[p.category] = (totalsByCategory[p.category] || 0) + p.price * p.quantity;
+    });
+    const labels = Object.keys(totalsByCategory);
+    const data = Object.values(totalsByCategory);
+
+    if (valuationChartInstance) valuationChartInstance.destroy();
+    if (labels.length > 0) {
+        valuationChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    data,
+                    backgroundColor: labels.map(name => categoryColor(categories, name)),
+                    borderRadius: 6,
+                    barThickness: 34
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { callback: v => formatCurrency(v) } },
+                    x: { ticks: { font: { size: 11, family: 'Inter' } } }
+                }
+            }
+        });
+    }
+
+    // --- Stock health breakdown ---
+    const counts = { ok: 0, low: 0, critical: 0 };
+    products.forEach(p => counts[stockLevel(p)]++);
+    const total = products.length || 1;
+    const rows = [
+        { key: 'ok', label: 'In Stock', cls: 'level-ok' },
+        { key: 'low', label: 'Low Stock', cls: 'level-low' },
+        { key: 'critical', label: 'Out of Stock', cls: 'level-critical' }
+    ];
+
+    document.getElementById('healthBreakdown').innerHTML = rows.map(r => `
+        <div class="health-row">
+            <span class="health-label">${r.label}</span>
+            <div class="health-track">
+                <div class="health-fill ${r.cls}" style="width:${Math.round((counts[r.key] / total) * 100)}%"></div>
+            </div>
+            <span class="health-count">${counts[r.key]}</span>
+        </div>
+    `).join('');
+
+    // --- Top products by value ---
+    const top = [...products]
+        .sort((a, b) => (b.price * b.quantity) - (a.price * a.quantity))
+        .slice(0, 5);
+
+    const topBody = document.getElementById('topProductsTableBody');
+    if (top.length === 0) {
+        topBody.innerHTML = `
+            <tr>
+                <td colspan="5">
+                    <div class="empty-state">
+                        <i class="fa-solid fa-ranking-star"></i>
+                        <strong>No products yet</strong>
+                        <span>Add products to see your highest-value items here.</span>
+                    </div>
+                </td>
+            </tr>`;
+        return;
+    }
+
+    topBody.innerHTML = top.map(p => {
+        const color = categoryColor(categories, p.category);
+        return `
+        <tr>
+            <td><span class="product-name-cell">${escapeHtml(p.name)}</span></td>
+            <td><span class="cat-pill" style="background:${color}1a;color:${color}">${escapeHtml(p.category)}</span></td>
+            <td class="price-cell">${formatCurrency(p.price)}</td>
+            <td class="qty-cell">${p.quantity}</td>
+            <td class="text-end price-cell">${formatCurrency(p.price * p.quantity)}</td>
+        </tr>`;
+    }).join('');
+}
+
+// ============================================================
+// PRODUCT FORM VALIDATION
+// ============================================================
 function validateForm() {
     let valid = true;
     const fields = [
@@ -297,13 +563,18 @@ function validateForm() {
     return valid;
 }
 
-// ---------------- Add / Edit modal ----------------
+function clearValidation() {
+    document.querySelectorAll('#addProductForm .is-invalid').forEach(el => el.classList.remove('is-invalid'));
+}
+
+// ---------------- Add / Edit product ----------------
 function openAddModal() {
     document.getElementById('addProductForm').reset();
     document.getElementById('prodId').value = '';
     document.getElementById('productModalTitle').innerText = 'Add New Product';
     document.getElementById('saveProductBtn').innerText = 'Save Product';
     document.getElementById('prodMinStock').value = 5;
+    populateProductCategorySelect(getStoredCategories());
     clearValidation();
 }
 
@@ -312,6 +583,7 @@ function openEditModal(id) {
     const product = products.find(p => p.id === id);
     if (!product) return;
 
+    populateProductCategorySelect(getStoredCategories());
     document.getElementById('prodId').value = product.id;
     document.getElementById('prodName').value = product.name;
     document.getElementById('prodCategory').value = product.category;
@@ -322,12 +594,7 @@ function openEditModal(id) {
     document.getElementById('saveProductBtn').innerText = 'Update Product';
     clearValidation();
 
-    const modal = new bootstrap.Modal(document.getElementById('addProductModal'));
-    modal.show();
-}
-
-function clearValidation() {
-    document.querySelectorAll('#addProductForm .is-invalid').forEach(el => el.classList.remove('is-invalid'));
+    new bootstrap.Modal(document.getElementById('addProductModal')).show();
 }
 
 document.getElementById('addProductForm').addEventListener('submit', function (e) {
@@ -359,8 +626,7 @@ document.getElementById('addProductForm').addEventListener('submit', function (e
     }
 
     this.reset();
-    const modalEl = document.getElementById('addProductModal');
-    bootstrap.Modal.getInstance(modalEl)?.hide();
+    bootstrap.Modal.getInstance(document.getElementById('addProductModal'))?.hide();
 });
 
 document.getElementById('addProductModal').addEventListener('show.bs.modal', function (e) {
@@ -368,7 +634,7 @@ document.getElementById('addProductModal').addEventListener('show.bs.modal', fun
     openAddModal();
 });
 
-// ---------------- Delete flow ----------------
+// ---------------- Delete product ----------------
 function openDeleteModal(id) {
     const products = getStoredProducts();
     const product = products.find(p => p.id === id);
@@ -376,10 +642,9 @@ function openDeleteModal(id) {
 
     state.pendingDeleteId = id;
     document.getElementById('deleteConfirmText').innerText =
-        `“${product.name}” will be permanently removed from your inventory.`;
+        `"${product.name}" will be permanently removed from your inventory.`;
 
-    const modal = new bootstrap.Modal(document.getElementById('deleteConfirmModal'));
-    modal.show();
+    new bootstrap.Modal(document.getElementById('deleteConfirmModal')).show();
 }
 
 document.getElementById('confirmDeleteBtn').addEventListener('click', function () {
@@ -393,52 +658,185 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', function (
     bootstrap.Modal.getInstance(document.getElementById('deleteConfirmModal'))?.hide();
 });
 
-// ---------------- Reset sample data ----------------
+// ============================================================
+// CATEGORY CRUD
+// ============================================================
+function renderSwatchRow(selected) {
+    const row = document.getElementById('swatchRow');
+    row.innerHTML = COLOR_PALETTE.map(color => `
+        <button type="button" class="swatch-btn ${color === selected ? 'selected' : ''}"
+            style="background:${color}" data-color="${color}" onclick="selectSwatch('${color}')"></button>
+    `).join('');
+    document.getElementById('catColor').value = selected;
+}
+
+function selectSwatch(color) {
+    document.getElementById('catColor').value = color;
+    document.querySelectorAll('.swatch-btn').forEach(btn => {
+        btn.classList.toggle('selected', btn.dataset.color === color);
+    });
+}
+
+function openAddCategoryModal() {
+    const categories = getStoredCategories();
+    document.getElementById('categoryForm').reset();
+    document.getElementById('catId').value = '';
+    document.getElementById('categoryModalTitle').innerText = 'Add New Category';
+    document.getElementById('saveCategoryBtn').innerText = 'Save Category';
+    renderSwatchRow(nextCategoryColor(categories));
+    clearCategoryValidation();
+}
+
+function openEditCategoryModal(id) {
+    const categories = getStoredCategories();
+    const cat = categories.find(c => c.id === id);
+    if (!cat) return;
+
+    document.getElementById('catId').value = cat.id;
+    document.getElementById('catName').value = cat.name;
+    document.getElementById('categoryModalTitle').innerText = 'Edit Category';
+    document.getElementById('saveCategoryBtn').innerText = 'Update Category';
+    renderSwatchRow(cat.color);
+    clearCategoryValidation();
+
+    new bootstrap.Modal(document.getElementById('categoryModal')).show();
+}
+
+function clearCategoryValidation() {
+    document.getElementById('catName').classList.remove('is-invalid');
+}
+
+document.getElementById('categoryModal').addEventListener('show.bs.modal', function (e) {
+    if (!e.relatedTarget) return; // opened programmatically via openEditCategoryModal
+    openAddCategoryModal();
+});
+
+document.getElementById('categoryForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    const nameInput = document.getElementById('catName');
+    const name = nameInput.value.trim();
+    const color = document.getElementById('catColor').value || COLOR_PALETTE[0];
+    const id = document.getElementById('catId').value;
+
+    const categories = getStoredCategories();
+    const duplicate = categories.some(c => c.name.toLowerCase() === name.toLowerCase() && c.id !== id);
+
+    if (!name || duplicate) {
+        nameInput.classList.add('is-invalid');
+        showToast(duplicate ? 'That category name already exists' : 'Enter a category name', 'error');
+        return;
+    }
+    nameInput.classList.remove('is-invalid');
+
+    if (id) {
+        const idx = categories.findIndex(c => c.id === id);
+        const oldName = categories[idx].name;
+        categories[idx] = { ...categories[idx], name, color };
+        saveCategories(categories);
+
+        if (oldName !== name) {
+            const products = getStoredProducts().map(p => p.category === oldName ? { ...p, category: name } : p);
+            saveProducts(products);
+        }
+        showToast(`${name} updated`, 'success');
+    } else {
+        categories.push({ id: `cat-${Date.now()}`, name, color });
+        saveCategories(categories);
+        showToast(`${name} added`, 'success');
+    }
+
+    this.reset();
+    bootstrap.Modal.getInstance(document.getElementById('categoryModal'))?.hide();
+});
+
+function openDeleteCategoryModal(id) {
+    const categories = getStoredCategories();
+    const cat = categories.find(c => c.id === id);
+    if (!cat) return;
+
+    const productsInUse = getStoredProducts().filter(p => p.category === cat.name).length;
+    state.pendingDeleteCategoryId = id;
+
+    const confirmBtn = document.getElementById('confirmDeleteCategoryBtn');
+    if (productsInUse > 0) {
+        document.getElementById('deleteCategoryTitle').innerText = 'Category still in use';
+        document.getElementById('deleteCategoryText').innerText =
+            `"${cat.name}" is used by ${productsInUse} product${productsInUse > 1 ? 's' : ''}. Reassign or delete those products before removing this category.`;
+        confirmBtn.hidden = true;
+    } else {
+        document.getElementById('deleteCategoryTitle').innerText = 'Remove this category?';
+        document.getElementById('deleteCategoryText').innerText =
+            `"${cat.name}" has no products and can be safely removed.`;
+        confirmBtn.hidden = false;
+    }
+
+    new bootstrap.Modal(document.getElementById('deleteCategoryModal')).show();
+}
+
+document.getElementById('confirmDeleteCategoryBtn').addEventListener('click', function () {
+    if (!state.pendingDeleteCategoryId) return;
+    let categories = getStoredCategories();
+    const cat = categories.find(c => c.id === state.pendingDeleteCategoryId);
+    categories = categories.filter(c => c.id !== state.pendingDeleteCategoryId);
+    saveCategories(categories);
+    showToast(`${cat ? cat.name : 'Category'} removed`, 'warn');
+    state.pendingDeleteCategoryId = null;
+    bootstrap.Modal.getInstance(document.getElementById('deleteCategoryModal'))?.hide();
+});
+
+// ============================================================
+// RESET / SEARCH / FILTER / SORT / SIDEBAR
+// ============================================================
 document.getElementById('resetDataBtn').addEventListener('click', () => {
-    localStorage.removeItem(STORAGE_KEY);
-    state.search = '';
-    state.category = '';
-    document.getElementById('searchInput').value = '';
-    renderApp();
+    localStorage.removeItem(PRODUCTS_KEY);
+    localStorage.removeItem(CATEGORIES_KEY);
+    Object.keys(tableState).forEach(key => {
+        tableState[key].search = '';
+        tableState[key].category = '';
+        const input = document.getElementById(TABLE_CONFIGS[key].search);
+        if (input) input.value = '';
+    });
+    renderAll();
     showToast('Sample data restored', 'success');
 });
 
-// ---------------- Search & filter handlers ----------------
-document.getElementById('searchInput').addEventListener('input', function (e) {
-    state.search = e.target.value;
-    renderApp();
+// Map a search/filter input's DOM id back to its table key.
+function tableKeyForInputId(id) {
+    return Object.keys(TABLE_CONFIGS).find(key =>
+        TABLE_CONFIGS[key].search === id || TABLE_CONFIGS[key].filter === id
+    );
+}
+
+document.addEventListener('input', function (e) {
+    const key = e.target && e.target.id && tableKeyForInputId(e.target.id);
+    if (!key || TABLE_CONFIGS[key].search !== e.target.id) return;
+    tableState[key].search = e.target.value;
+    renderAll();
 });
 
-document.getElementById('categoryFilter').addEventListener('change', function (e) {
-    state.category = e.target.value;
-    renderApp();
+document.addEventListener('change', function (e) {
+    const key = e.target && e.target.id && tableKeyForInputId(e.target.id);
+    if (!key || TABLE_CONFIGS[key].filter !== e.target.id) return;
+    tableState[key].category = e.target.value;
+    renderAll();
 });
 
-// ---------------- Sortable headers ----------------
-document.querySelectorAll('th[data-sort]').forEach(th => {
-    th.addEventListener('click', () => {
-        const key = th.dataset.sort;
-        if (state.sortKey === key) {
-            state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
-        } else {
-            state.sortKey = key;
-            state.sortDir = 'asc';
-        }
-        renderApp();
-    });
-});
+document.addEventListener('click', function (e) {
+    const th = e.target.closest('th[data-sort]');
+    if (!th) return;
+    const section = th.closest('.page-section');
+    const key = section && Object.keys(TABLE_CONFIGS).find(k => TABLE_CONFIGS[k].section === section.id);
+    if (!key) return;
 
-// ---------------- Sidebar nav (mobile + placeholder sections) ----------------
-document.querySelectorAll('.sidebar .nav-link').forEach(link => {
-    link.addEventListener('click', (e) => {
-        e.preventDefault();
-        document.querySelectorAll('.sidebar .nav-link').forEach(l => l.classList.remove('active'));
-        link.classList.add('active');
-        closeSidebar();
-        if (link.dataset.nav !== 'dashboard') {
-            showToast('This section is not built yet in the demo', 'warn');
-        }
-    });
+    const s = tableState[key];
+    const sortKey = th.dataset.sort;
+    if (s.sortKey === sortKey) {
+        s.sortDir = s.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        s.sortKey = sortKey;
+        s.sortDir = 'asc';
+    }
+    renderAll();
 });
 
 function openSidebar() {
@@ -454,4 +852,6 @@ document.getElementById('hamburgerBtn').addEventListener('click', openSidebar);
 document.getElementById('sidebarBackdrop').addEventListener('click', closeSidebar);
 
 // ---------------- Initial load ----------------
-document.addEventListener('DOMContentLoaded', renderApp);
+document.addEventListener('DOMContentLoaded', () => {
+    goToPage('dashboard');
+});
