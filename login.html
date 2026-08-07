@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockFlow — Sign in</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="auth-body">
+
+    <div class="auth-card">
+        <div class="auth-brand"><i class="fa-solid fa-boxes-stacked"></i> StockFlow</div>
+        <p class="auth-sub">Sign in to manage your inventory.</p>
+
+        <div id="authError" class="auth-error" hidden></div>
+
+        <!-- Sign in -->
+        <form id="loginForm" class="auth-form">
+            <label for="loginEmail">Email</label>
+            <input type="email" id="loginEmail" class="form-control" required placeholder="you@example.com">
+            <label for="loginPassword">Password</label>
+            <input type="password" id="loginPassword" class="form-control" required placeholder="••••••••">
+            <button type="submit" class="btn btn-solid w-100">Sign in</button>
+        </form>
+
+        <!-- Create account -->
+        <form id="registerForm" class="auth-form" hidden>
+            <label for="regEmail">Email</label>
+            <input type="email" id="regEmail" class="form-control" required placeholder="you@example.com">
+            <label for="regPassword">Password</label>
+            <input type="password" id="regPassword" class="form-control" required placeholder="At least 6 characters" minlength="6">
+            <button type="submit" class="btn btn-solid w-100">Create account</button>
+        </form>
+
+        <p class="auth-toggle" id="toRegisterWrap">New here? <a href="#" id="showRegister">Create an account</a></p>
+        <p class="auth-toggle" id="toLoginWrap" hidden>Already have an account? <a href="#" id="showLogin">Sign in</a></p>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
+    <script src="login.js"></script>
+</body>
+</html>
